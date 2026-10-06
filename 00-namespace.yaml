@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: campusflow
+  labels:
+    app.kubernetes.io/name: campusflow
+    app.kubernetes.io/part-of: campusflow-platform

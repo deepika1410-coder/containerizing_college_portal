@@ -1,0 +1,116 @@
+version: '3.8'
+
+services:
+  # ==========================================
+  # Relational Database: PostgreSQL 16
+  # ==========================================
+  postgresql:
+    image: postgres:16-alpine
+    container_name: campusflow-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: campusflow
+      POSTGRES_PASSWORD: campusflow_secret
+      POSTGRES_DB: campusflow_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backend/src/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U campusflow -d campusflow_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - campusflow-net
+
+  # ==========================================
+  # Backend API Service (Node.js + Express)
+  # ==========================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: ../docker/Dockerfile.backend
+    container_name: campusflow-backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      DATABASE_URL: postgresql://campusflow:campusflow_secret@postgresql:5432/campusflow_db
+      JWT_SECRET: campusflow_production_jwt_secret_key_8849
+      JWT_EXPIRES_IN: 24h
+      AUTO_SEED: "true"
+    ports:
+      - "5000:5000"
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - campusflow-net
+
+  # ==========================================
+  # Frontend Web Client (React + Nginx)
+  # ==========================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../docker/Dockerfile.frontend
+    container_name: campusflow-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - campusflow-net
+
+  # ==========================================
+  # Metrics Scraper: Prometheus
+  # ==========================================
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: campusflow-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - campusflow-net
+
+  # ==========================================
+  # Visualization: Grafana
+  # ==========================================
+  grafana:
+    image: grafana/grafana:11.0.0
+    container_name: campusflow-grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=campusflow_admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafanadata:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - campusflow-net
+
+volumes:
+  pgdata:
+  promdata:
+  grafanadata:
+
+networks:
+  campusflow-net:
+    driver: bridge
